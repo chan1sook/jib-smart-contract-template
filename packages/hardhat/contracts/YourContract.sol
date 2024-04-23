@@ -15,7 +15,8 @@ import "hardhat/console.sol";
 contract YourContract {
 	// State Variables
 	address public immutable owner;
-	string public greeting = "Building Unstoppable Apps!!!";
+	string public greeting = "Smart Contract v2";
+	address public messageOwner;
 	bool public premium = false;
 	uint256 public totalCounter = 0;
 	mapping(address => uint) public userGreetingCounter;
@@ -32,6 +33,7 @@ contract YourContract {
 	// Check packages/hardhat/deploy/00_deploy_your_contract.ts
 	constructor(address _owner) {
 		owner = _owner;
+		messageOwner = _owner;
 	}
 
 	// Modifier: used to define a set of rules that must be met before or after a function is executed
@@ -59,13 +61,10 @@ contract YourContract {
 		greeting = _newGreeting;
 		totalCounter += 1;
 		userGreetingCounter[msg.sender] += 1;
+		messageOwner = msg.sender;
 
 		// msg.value: built-in global variable that represents the amount of ether sent with the transaction
-		if (msg.value > 0) {
-			premium = true;
-		} else {
-			premium = false;
-		}
+		premium = msg.value > 0;
 
 		// emit: keyword used to trigger an event
 		emit GreetingChange(msg.sender, _newGreeting, msg.value > 0, msg.value);
