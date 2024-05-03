@@ -5,97 +5,53 @@ import { BloatContainer } from "./_components/BloatContainer";
 import { ErrorQuote } from "./_components/ErrorQuote";
 import { GreetingQuote } from "./_components/GreetingQuote";
 import { NextPage } from "next";
-import {
-  useAccount,
-  useReadContract,
-  useWaitForTransactionReceipt,
-  useWatchContractEvent,
-  useWriteContract,
-} from "wagmi";
 import { InputBase, IntegerInput } from "~~/components/scaffold-eth";
-import { useDeployedContractInfo, useTransactor } from "~~/hooks/scaffold-eth";
+import {
+  useScaffoldReadContract,
+  useScaffoldWatchContractEvent,
+  useScaffoldWriteContract,
+} from "~~/hooks/scaffold-eth";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
 import { contracts } from "~~/utils/scaffold-eth/contract";
 
-interface LogOutput {
-  greetingSetter: string;
-  newGreeting: string;
-  premium: boolean;
-  value: bigint;
-}
 const GreetingPage: NextPage = () => {
   const contractName = "YourContract";
 
-  const { address: connectedAddress } = useAccount();
+  const { refetch: refetchGreeting } = useScaffoldReadContract({
+    contractName: contractName,
+    functionName: "greeting",
+  });
+  const { refetch: refetchPremium } = useScaffoldReadContract({
+    contractName: contractName,
+    functionName: "premium",
+  });
+
+  const { refetch: refetchMessageOwner } = useScaffoldReadContract({
+    contractName: contractName,
+    functionName: "messageOwner",
+  });
 
   const [txValue, setTxValue] = useState<string | bigint>("");
   const [message, setMessage] = useState<string>("Loading Greeting Text");
-  const [messageOwner, setMessageOwner] = useState<string>(connectedAddress || "");
+  const [messageOwner, setMessageOwner] = useState<string>("");
   const [preminum, setPreimum] = useState<boolean>(false);
   const [formMessage, setFormMessage] = useState<string>("Hello World");
 
   const { targetNetwork } = useTargetNetwork();
-  const writeTxn = useTransactor();
-  const { data: deployedContractData, isLoading: deployedContractLoading } = useDeployedContractInfo(contractName);
-  const { refetch: refetchGreeting } = useReadContract({
-    address: deployedContractData?.address,
-    functionName: "greeting",
-    abi: deployedContractData?.abi,
-    chainId: targetNetwork.id,
-    scopeKey: "greeting",
-  });
-  const { refetch: refetchPremium } = useReadContract({
-    address: deployedContractData?.address,
-    functionName: "premium",
-    abi: deployedContractData?.abi,
-    chainId: targetNetwork.id,
-    scopeKey: "premium",
-  });
-  const { refetch: refetchMessageOwner } = useReadContract({
-    address: deployedContractData?.address,
-    functionName: "messageOwner",
-    abi: deployedContractData?.abi,
-    chainId: targetNetwork.id,
-    scopeKey: "messageOwner",
-  });
-  useWatchContractEvent({
-    address: deployedContractData?.address,
-    chainId: targetNetwork.id,
-    eventName: "GreetingChange",
-    abi: deployedContractData?.abi,
-    onLogs(logs) {
-      const lastestLog = logs[logs.length - 1];
-      const data = (lastestLog as unknown as { args: LogOutput }).args;
-      setMessageOwner(data.greetingSetter);
-      setMessage(data.newGreeting);
-      setPreimum(data.premium);
-    },
-  });
-
-  const { data: hash, isPending, writeContractAsync } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
-    hash,
-  });
+  const { isMining, isPending, writeContractAsync } = useScaffoldWriteContract(contractName);
 
   const contractNames = contracts ? contracts[targetNetwork.id] || {} : {};
   const hasYourContract = Object.keys(contractNames).includes(contractName);
 
   async function updateMessageBlockchain() {
-    if (writeContractAsync && deployedContractData) {
-      try {
-        const makeWriteWithParams = () =>
-          writeContractAsync({
-            address: deployedContractData?.address,
-            functionName: "setGreeting",
-            abi: deployedContractData?.abi,
-            args: [formMessage],
-            value: BigInt(txValue),
-          });
-        await writeTxn(makeWriteWithParams);
-        // await updateValues();
-      } catch (e: any) {
-        console.error("⚡️ ~ file: WriteOnlyFunctionForm.tsx:handleWrite ~ error", e);
-      }
+    try {
+      await writeContractAsync({
+        functionName: "setGreeting",
+        args: [formMessage],
+        value: BigInt(txValue),
+      });
+    } catch (e: any) {
+      console.error("⚡️ ~ file: WriteOnlyFunctionForm.tsx:handleWrite ~ error", e);
     }
   }
 
@@ -118,6 +74,22 @@ const GreetingPage: NextPage = () => {
     updateValues().catch(console.error);
   });
 
+  useScaffoldWatchContractEvent({
+    contractName: contractName,
+    eventName: "GreetingChange",
+    onLogs(logs) {
+      if (logs.length > 0) {
+        const lastestLog = logs[logs.length - 1];
+        const data = lastestLog.args;
+        if (data.greetingSetter !== undefined && data.newGreeting !== undefined && data.premium !== undefined) {
+          setMessageOwner(data.greetingSetter);
+          setMessage(data.newGreeting);
+          setPreimum(data.premium);
+        }
+      }
+    },
+  });
+
   return (
     <>
       <div className="flex items-center flex-col flex-grow pt-10">
@@ -126,47 +98,39 @@ const GreetingPage: NextPage = () => {
             <span className="block text-4xl font-bold">Greeting DAPP</span>
           </h1>
           {hasYourContract ? (
-            deployedContractLoading ? (
-              <div className="text-center text-2xl">
-                <span className="loading loading-spinner loading-xs"></span> Loading...
-              </div>
-            ) : (
-              <>
-                <GreetingQuote message={message} address={messageOwner} isPremium={preminum} />
-                <div className="flex flex-col gap-y-4">
-                  <BloatContainer title="Greeting">
-                    <div className="py-5 space-y-3 first:pt-0 last:pb-1">
-                      <div className="flex flex-col gap-1.5 w-full">
-                        <div className="flex items-center ml-2">
-                          <span className="text-xs font-medium mr-2 leading-none">Message</span>
-                          <span className="block text-xs font-extralight leading-none">string</span>
-                        </div>
-                        <InputBase value={formMessage} onChange={setFormMessage} placeholder="Enter your message" />
+            <>
+              <GreetingQuote message={message} address={messageOwner} isPremium={preminum} />
+              <div className="flex flex-col gap-y-4">
+                <BloatContainer title="Greeting">
+                  <div className="py-5 space-y-3 first:pt-0 last:pb-1">
+                    <div className="flex flex-col gap-1.5 w-full">
+                      <div className="flex items-center ml-2">
+                        <span className="text-xs font-medium mr-2 leading-none">Message</span>
+                        <span className="block text-xs font-extralight leading-none">string</span>
                       </div>
-                      <div className="flex flex-col gap-1.5 w-full">
-                        <div className="flex items-center ml-2">
-                          <span className="text-xs font-medium mr-2 leading-none">Payment</span>
-                          <span className="block text-xs font-extralight leading-none">payable wei</span>
-                        </div>
-                        <IntegerInput name="Payment" value={txValue} onChange={setTxValue} placeholder="value (wei)" />
-                      </div>
-                      <div className="flex flex-col justify-end gap-1.5 w-full">
-                        <button
-                          className="self-end btn btn-secondary btn-sm"
-                          onClick={updateMessageBlockchain}
-                          disabled={isPending || (isConfirming && !isConfirmed)}
-                        >
-                          {(isPending || (isConfirming && !isConfirmed)) && (
-                            <span className="loading loading-spinner loading-xs"></span>
-                          )}
-                          Submit
-                        </button>
-                      </div>
+                      <InputBase value={formMessage} onChange={setFormMessage} placeholder="Enter your message" />
                     </div>
-                  </BloatContainer>
-                </div>
-              </>
-            )
+                    <div className="flex flex-col gap-1.5 w-full">
+                      <div className="flex items-center ml-2">
+                        <span className="text-xs font-medium mr-2 leading-none">Payment</span>
+                        <span className="block text-xs font-extralight leading-none">payable wei</span>
+                      </div>
+                      <IntegerInput name="Payment" value={txValue} onChange={setTxValue} placeholder="value (wei)" />
+                    </div>
+                    <div className="flex flex-col justify-end gap-1.5 w-full">
+                      <button
+                        className="self-end btn btn-secondary btn-sm"
+                        onClick={updateMessageBlockchain}
+                        disabled={isPending || isMining}
+                      >
+                        {(isPending || isMining) && <span className="loading loading-spinner loading-xs"></span>}
+                        Submit
+                      </button>
+                    </div>
+                  </div>
+                </BloatContainer>
+              </div>
+            </>
           ) : (
             <ErrorQuote messages={["Wrong chain: JBC Only", "Wrong chain: Local chain is OK"]} />
           )}
